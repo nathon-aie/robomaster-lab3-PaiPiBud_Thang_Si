@@ -1,0 +1,23 @@
+# RoboMaster settings configuration
+
+robot:
+  id: "robomaster_ep"
+  connection:
+    type: "wifi"
+
+chassis:
+  speed:
+    default_x: 0.5
+    default_y: 0.5
+    default_w: 30
+
+gimbal:
+  speed:
+    default_pitch: 30
+    default_yaw: 30
+
+vision:
+  resolution: "720p"
+
+logger:
+  frequency_hz: 10
