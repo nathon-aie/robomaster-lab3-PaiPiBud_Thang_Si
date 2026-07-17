@@ -83,8 +83,8 @@ class Chassis:
         """
         xy_speed = self.default_x if xy_speed is None else xy_speed
         z_speed = self.default_w if z_speed is None else z_speed
-        action = self._chassis.move(x=x, y=y, z=z, xy_speed=xy_speed, z_speed=z_speed)
-        action.wait_for_completed(timeout=timeout)
+        action = self._chassis.move(x=x, y=y, z=z, xy_speed=xy_speed, z_speed=z_speed).wait_for_completed()
+        # action.wait_for_completed(timeout=timeout)
 
     def stop(self, timeout: Optional[float] = 5.0) -> None:
         """Stop the chassis immediately by setting speed to 0."""
