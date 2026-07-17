@@ -3,6 +3,7 @@ import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 from robomaster import robot
+from src.config_loader import load_settings
 
 
 class DataLogger:
@@ -18,27 +19,62 @@ class DataLogger:
         self,
         ep_robot: robot.Robot,
         output_dir: Optional[str] = None,
-        frequency_hz: int = 10,
+        frequency_hz: Optional[int] = None,
     ) -> None:
         """Initializes the DataLogger.
 
         Args:
             ep_robot: An initialized Robot instance.
             output_dir: Directory where CSV files will be saved. If None, defaults to project_root/data/raw.
-            frequency_hz: Subscription frequency for sensor data (1 to 50 Hz).
+            frequency_hz: Subscription frequency for sensor data (1 to 50 Hz). If None, loaded from settings.yaml.
         """
         self.robot = ep_robot
+        settings = load_settings()
+        logger_settings = settings.get("logger", {})
+
         if output_dir is None:
             self.output_dir = Path(__file__).resolve().parents[1] / "data" / "raw"
         else:
             self.output_dir = Path(output_dir)
-        self.frequency = frequency_hz
+        self.frequency = frequency_hz if frequency_hz is not None else logger_settings.get("frequency_hz", 10)
 
-        # Storage for logged data
-        self.position_data: List[Dict[str, float]] = []
-        self.attitude_data: List[Dict[str, float]] = []
-        self.imu_data: List[Dict[str, float]] = []
-        self.esc_data: List[Dict[str, Any]] = []
+        # Telemetry registry mapping
+        self.telemetry: Dict[str, Dict[str, Any]] = {
+            "position": {
+                "data": [],
+                "headers": ["timestamp", "x", "y", "z"],
+                "sub": self.robot.chassis.sub_position,
+                "unsub": self.robot.chassis.unsub_position,
+                "callback": self._position_handler
+            },
+            "attitude": {
+                "data": [],
+                "headers": ["timestamp", "yaw", "pitch", "roll"],
+                "sub": self.robot.chassis.sub_attitude,
+                "unsub": self.robot.chassis.unsub_attitude,
+                "callback": self._attitude_handler
+            },
+            "imu": {
+                "data": [],
+                "headers": ["timestamp", "acc_x", "acc_y", "acc_z", "gyro_x", "gyro_y", "gyro_z"],
+                "sub": self.robot.chassis.sub_imu,
+                "unsub": self.robot.chassis.unsub_imu,
+                "callback": self._imu_handler
+            },
+            "esc": {
+                "data": [],
+                "headers": ["timestamp", "speed", "angle", "esc_timestamp", "state"],
+                "sub": self.robot.chassis.sub_esc,
+                "unsub": self.robot.chassis.unsub_esc,
+                "callback": self._esc_handler
+            }
+        }
+
+        # Mutably aliased list properties for backward compatibility
+        self.position_data = self.telemetry["position"]["data"]
+        self.attitude_data = self.telemetry["attitude"]["data"]
+        self.imu_data = self.telemetry["imu"]["data"]
+        self.esc_data = self.telemetry["esc"]["data"]
 
         # State tracking
         self.start_time: float = 0.0
@@ -114,19 +150,15 @@ class DataLogger:
         self.current_run_dir = self.output_dir / f"run{run_idx}"
 
         print(f"Starting telemetry logging at {self.frequency} Hz (saving to {self.current_run_dir.name})...")
-        self.position_data.clear()
-        self.attitude_data.clear()
-        self.imu_data.clear()
-        self.esc_data.clear()
+        for sensor in self.telemetry.values():
+            sensor["data"].clear()
 
         self.start_time = time.time()
         self._is_logging = True
 
         # Subscribe to chassis sensors
-        self.robot.chassis.sub_position(freq=self.frequency, callback=self._position_handler)
-        self.robot.chassis.sub_attitude(freq=self.frequency, callback=self._attitude_handler)
-        self.robot.chassis.sub_imu(freq=self.frequency, callback=self._imu_handler)
-        self.robot.chassis.sub_esc(freq=self.frequency, callback=self._esc_handler)
+        for sensor in self.telemetry.values():
+            sensor["sub"](freq=self.frequency, callback=sensor["callback"])
 
     def stop(self) -> None:
         """Stops subscriptions and pauses logging."""
@@ -138,19 +170,17 @@ class DataLogger:
         self._is_logging = False
 
         # Unsubscribe from chassis sensors
-        try:
-            self.robot.chassis.unsub_position()
-            self.robot.chassis.unsub_attitude()
-            self.robot.chassis.unsub_imu()
-            self.robot.chassis.unsub_esc()
-        except Exception as e:
-            print(f"Error while unsubscribing: {e}")
+        for key, sensor in self.telemetry.items():
+            try:
+                sensor["unsub"]()
+            except Exception as e:
+                print(f"Error while unsubscribing {key}: {e}")
 
     def save(self, prefix: Optional[str] = None) -> None:
         """Saves logged data to CSV files inside the current run folder.
 
         Args:
-            prefix: Optional prefix to prepend to CSV filenames. If omitted, files are saved as position.csv, attitude.csv, imu.csv.
+            prefix: Optional prefix to prepend to CSV filenames. If omitted, uses current date in YYYYMMDD.
         """
         if self.current_run_dir is None:
             if not self.output_dir.exists():
@@ -163,31 +193,14 @@ class DataLogger:
         self.current_run_dir.mkdir(parents=True, exist_ok=True)
 
         date_str = prefix if prefix else time.strftime("%Y%m%d")
-        filename_pos = f"log_{date_str}_position.csv"
-        filename_att = f"log_{date_str}_attitude.csv"
-        filename_imu = f"log_{date_str}_imu.csv"
-        filename_esc = f"log_{date_str}_esc.csv"
 
-        self._write_csv(
-            self.current_run_dir / filename_pos,
-            ["timestamp", "x", "y", "z"],
-            self.position_data,
-        )
-        self._write_csv(
-            self.current_run_dir / filename_att,
-            ["timestamp", "yaw", "pitch", "roll"],
-            self.attitude_data,
-        )
-        self._write_csv(
-            self.current_run_dir / filename_imu,
-            ["timestamp", "acc_x", "acc_y", "acc_z", "gyro_x", "gyro_y", "gyro_z"],
-            self.imu_data,
-        )
-        self._write_csv(
-            self.current_run_dir / filename_esc,
-            ["timestamp", "speed", "angle", "esc_timestamp", "state"],
-            self.esc_data,
-        )
+        for key, sensor in self.telemetry.items():
+            filename = f"log_{date_str}_{key}.csv"
+            self._write_csv(
+                self.current_run_dir / filename,
+                sensor["headers"],
+                sensor["data"]
+            )
 
     def _write_csv(self, file_path: Path, headers: List[str], data: List[Dict[str, float]]) -> None:
         """Helper function to write a list of dictionaries to a CSV file."""

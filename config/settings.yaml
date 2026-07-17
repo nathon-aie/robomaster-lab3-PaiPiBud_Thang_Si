@@ -10,6 +10,9 @@ chassis:
     default_x: 0.5
     default_y: 0.5
     default_w: 30
+  displacement:
+    default_distance: 0.6
+    default_angle: 90
 
 gimbal:
   speed:

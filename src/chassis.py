@@ -1,5 +1,6 @@
 from typing import Optional, Any
 from robomaster import robot
+from src.config_loader import load_settings
 
 
 class Chassis:
@@ -11,10 +12,12 @@ class Chassis:
     def __init__(
         self,
         ep_robot: Optional[robot.Robot] = None,
-        conn_type: str = "ap",
-        default_x: float = 0.5,
-        default_y: float = 0.5,
-        default_w: float = 30.0,
+        conn_type: Optional[str] = None,
+        default_x: Optional[float] = None,
+        default_y: Optional[float] = None,
+        default_w: Optional[float] = None,
+        default_distance: Optional[float] = None,
+        default_angle: Optional[float] = None,
     ) -> None:
         """Initializes the Chassis wrapper.
 
@@ -25,7 +28,16 @@ class Chassis:
             default_x: Default translation speed/displacement scale along the X-axis (m/s or meters).
             default_y: Default translation speed/displacement scale along the Y-axis (m/s or meters).
             default_w: Default angular speed/displacement scale around the Z-axis (deg/s or degrees).
+            default_distance: Default displacement distance (meters).
+            default_angle: Default turn angle (degrees).
         """
+        settings = load_settings()
+        robot_settings = settings.get("robot", {})
+        chassis_settings = settings.get("chassis", {}).get("speed", {})
+        displacement_settings = settings.get("chassis", {}).get("displacement", {})
+
+        resolved_conn_type = conn_type if conn_type is not None else robot_settings.get("connection", {}).get("type", "ap")
+
         self._owns_robot = ep_robot is None
         if self._owns_robot:
             self.robot = robot.Robot()
@@ -39,15 +51,17 @@ class Chassis:
                 "rndis": "rndis",
                 "usb": "rndis"
             }
-            resolved_conn_type = conn_map.get(conn_type.lower(), "ap")
-            self.robot.initialize(conn_type=resolved_conn_type)
+            mapped_conn_type = conn_map.get(resolved_conn_type.lower(), "ap")
+            self.robot.initialize(conn_type=mapped_conn_type)
         else:
             self.robot = ep_robot
 
         self._chassis = self.robot.chassis
-        self.default_x = default_x
-        self.default_y = default_y
-        self.default_w = default_w
+        self.default_x = default_x if default_x is not None else chassis_settings.get("default_x", 0.5)
+        self.default_y = default_y if default_y is not None else chassis_settings.get("default_y", 0.5)
+        self.default_w = default_w if default_w is not None else chassis_settings.get("default_w", 30.0)
+        self.default_distance = default_distance if default_distance is not None else displacement_settings.get("default_distance", 0.6)
+        self.default_angle = default_angle if default_angle is not None else displacement_settings.get("default_angle", 90.0)
 
     def drive_speed(self, x: float = 0.0, y: float = 0.0, z: float = 0.0, timeout: Optional[float] = 5.0) -> None:
         """Drive the robot with a continuous speed command.
@@ -99,13 +113,11 @@ class Chassis:
         """Move the robot forward.
 
         If `distance` is specified (meters), it performs a relative movement and blocks until finished.
-        Otherwise, it sets a continuous forward speed.
+        Otherwise, it defaults to the configured default_distance.
         """
         speed = self.default_x if speed is None else speed
-        if distance is not None:
-            self.move(x=distance, xy_speed=speed, timeout=timeout)
-        else:
-            self.drive_speed(x=speed, y=0.0, z=0.0, timeout=timeout)
+        dist = self.default_distance if distance is None else distance
+        self.move(x=dist, xy_speed=speed, timeout=timeout)
 
     def move_backward(
         self,
@@ -116,13 +128,11 @@ class Chassis:
         """Move the robot backward.
 
         If `distance` is specified (meters), it performs a relative movement and blocks until finished.
-        Otherwise, it sets a continuous backward speed.
+        Otherwise, it defaults to the configured default_distance.
         """
         speed = self.default_x if speed is None else speed
-        if distance is not None:
-            self.move(x=-distance, xy_speed=speed, timeout=timeout)
-        else:
-            self.drive_speed(x=-speed, y=0.0, z=0.0, timeout=timeout)
+        dist = self.default_distance if distance is None else distance
+        self.move(x=-dist, xy_speed=speed, timeout=timeout)
 
     def move_left(
         self,
@@ -133,14 +143,11 @@ class Chassis:
         """Move the robot to the left.
 
         If `distance` is specified (meters), it performs a relative movement and blocks until finished.
-        Otherwise, it sets a continuous lateral speed to the left.
+        Otherwise, it defaults to the configured default_distance.
         """
         speed = self.default_y if speed is None else speed
-        if distance is not None:
-            # Positive y in drive_speed/move is right, so left is negative
-            self.move(y=-distance, xy_speed=speed, timeout=timeout)
-        else:
-            self.drive_speed(x=0.0, y=-speed, z=0.0, timeout=timeout)
+        dist = self.default_distance if distance is None else distance
+        self.move(y=-dist, xy_speed=speed, timeout=timeout)
 
     def move_right(
         self,
@@ -151,14 +158,11 @@ class Chassis:
         """Move the robot to the right.
 
         If `distance` is specified (meters), it performs a relative movement and blocks until finished.
-        Otherwise, it sets a continuous lateral speed to the right.
+        Otherwise, it defaults to the configured default_distance.
         """
         speed = self.default_y if speed is None else speed
-        if distance is not None:
-            # Positive y in drive_speed/move is right
-            self.move(y=distance, xy_speed=speed, timeout=timeout)
-        else:
-            self.drive_speed(x=0.0, y=speed, z=0.0, timeout=timeout)
+        dist = self.default_distance if distance is None else distance
+        self.move(y=dist, xy_speed=speed, timeout=timeout)
 
     def turn_left(
         self,
@@ -169,14 +173,11 @@ class Chassis:
         """Turn the robot to the left (counter-clockwise).
 
         If `angle` is specified (degrees), it performs a relative rotation and blocks until finished.
-        Otherwise, it sets a continuous rotational speed to the left.
+        Otherwise, it defaults to the configured default_angle.
         """
         angular_speed = self.default_w if angular_speed is None else angular_speed
-        if angle is not None:
-            # Positive z is counter-clockwise (left)
-            self.move(z=angle, z_speed=angular_speed, timeout=timeout)
-        else:
-            self.drive_speed(x=0.0, y=0.0, z=angular_speed, timeout=timeout)
+        ang = self.default_angle if angle is None else angle
+        self.move(z=ang, z_speed=angular_speed, timeout=timeout)
 
     def turn_right(
         self,
@@ -187,14 +188,11 @@ class Chassis:
         """Turn the robot to the right (clockwise).
 
         If `angle` is specified (degrees), it performs a relative rotation and blocks until finished.
-        Otherwise, it sets a continuous rotational speed to the right.
+        Otherwise, it defaults to the configured default_angle.
         """
         angular_speed = self.default_w if angular_speed is None else angular_speed
-        if angle is not None:
-            # Negative z is clockwise (right)
-            self.move(z=-angle, z_speed=angular_speed, timeout=timeout)
-        else:
-            self.drive_speed(x=0.0, y=0.0, z=-angular_speed, timeout=timeout)
+        ang = self.default_angle if angle is None else angle
+        self.move(z=-ang, z_speed=angular_speed, timeout=timeout)
 
     def close(self) -> None:
         """Close the underlying robot connection if this wrapper owns it."""
