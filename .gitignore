@@ -3,6 +3,8 @@
 __pycache__/
 *.pyc
 
+data/processed/
+data/raw/
 
 # IDE settings
 .vscode/
