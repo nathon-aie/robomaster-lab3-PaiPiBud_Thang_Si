@@ -4,7 +4,7 @@ __pycache__/
 *.pyc
 *.csv
 *.png
-*.txt
+PaiPiBud_Thang_Si.txt
 
 # IDE settings
 .vscode/
